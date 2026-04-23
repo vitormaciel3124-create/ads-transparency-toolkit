@@ -89,6 +89,17 @@ def scrape_creatives(url, max_scroll=50):
         if total_reported:
             print(f"  Página reporta: {total_reported}")
 
+        # Click "See all ads" / "Ver mais resultados" if present
+        for btn_text in ["See all ads", "Ver mais resultados", "See all", "Ver todos"]:
+            try:
+                btn = page.query_selector(f"material-button:has-text('{btn_text}')")
+                if btn and btn.is_visible():
+                    print(f"  Clicando '{btn_text}'...")
+                    btn.click()
+                    page.wait_for_timeout(3000)
+            except Exception:
+                pass
+
         # Scroll to load all ads
         prev_count = 0
         stale_rounds = 0
@@ -96,6 +107,15 @@ def scrape_creatives(url, max_scroll=50):
         for scroll_i in range(max_scroll):
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             page.wait_for_timeout(1500)
+
+            # Click "Ver mais resultados" if it appears during scrolling
+            try:
+                more_btn = page.query_selector("material-button.search-improvements-see-more-button")
+                if more_btn and more_btn.is_visible():
+                    more_btn.click()
+                    page.wait_for_timeout(2000)
+            except Exception:
+                pass
 
             links = page.query_selector_all("a[href*='/creative/']")
             current_count = len(links)
@@ -106,7 +126,7 @@ def scrape_creatives(url, max_scroll=50):
                     print(f"  Scroll {scroll_i + 1}: {current_count} criativos carregados...")
             else:
                 stale_rounds += 1
-                if stale_rounds >= 4:
+                if stale_rounds >= 5:
                     print(f"  Scroll parou em {current_count} criativos (sem novos após {stale_rounds} tentativas)")
                     break
 
