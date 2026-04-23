@@ -112,13 +112,20 @@ def scrape_creatives(url, max_scroll=50):
 
             prev_count = current_count
 
-        # Extract data from each creative link
-        links = page.query_selector_all("a[href*='/creative/']")
-        print(f"  Extraindo dados de {len(links)} links...")
+        # Extract data from each <creative-preview> card
+        cards = page.query_selector_all("creative-preview")
+        if not cards:
+            cards = page.query_selector_all("a[href*='/creative/']")
+        print(f"  Extraindo dados de {len(cards)} cards...")
 
         seen_urls = set()
-        for link in links:
+        for card in cards:
             try:
+                # Find the creative link inside the card
+                link = card.query_selector("a[href*='/creative/']") if card.evaluate("el => el.tagName") != "A" else card
+                if not link:
+                    continue
+
                 href = link.get_attribute("href") or ""
                 if href in seen_urls:
                     continue
@@ -134,30 +141,27 @@ def scrape_creatives(url, max_scroll=50):
                     cr_part = href.split("/creative/")[1]
                     creative_id = cr_part.split("?")[0]
 
-                # Try to get the parent card for more metadata
-                card = link.evaluate("""el => {
-                    let parent = el.closest('[role], [class*="card"], [class*="creative"]') || el.parentElement?.parentElement;
-                    if (!parent) return {};
-                    let text = parent.innerText || '';
-                    let lines = text.split('\\n').map(l => l.trim()).filter(Boolean);
-                    return { text: text.substring(0, 300), lines: lines.slice(0, 10) };
+                # Extract metadata using the Angular component structure
+                meta = card.evaluate("""el => {
+                    let root = el.closest('creative-preview') || el;
+                    let nameEl = root.querySelector('.advertiser-name, [class*="advertiser-name"]');
+                    let verifiedEl = root.querySelector('.verified, [class*="verified"]');
+                    let iconLink = root.querySelector('a');
+                    let iconText = iconLink ? iconLink.textContent.trim() : '';
+
+                    return {
+                        name: nameEl ? nameEl.textContent.trim() : null,
+                        verified: !!verifiedEl,
+                        icon: iconText
+                    };
                 }""")
 
-                lines = card.get("lines", [])
+                advertiser_name = meta.get("name")
+                is_verified = meta.get("verified", False)
+                icon_text = (meta.get("icon") or "").lower().strip()
 
-                # Heuristic: extract advertiser name and format icon from card text
-                advertiser_name = None
-                is_verified = False
-                format_icon = None
-
-                for line in lines:
-                    if line.lower() in ("videocam", "image", "text_snippet", "web"):
-                        format_icon = line.lower()
-                    elif line.lower() in ("verificado", "verified"):
-                        is_verified = True
-                    elif line and not line.startswith("http") and len(line) > 2 and line not in ("videocam",):
-                        if advertiser_name is None:
-                            advertiser_name = line
+                format_map = {"videocam": "video", "image": "image", "text_snippet": "text", "web": "web"}
+                format_type = format_map.get(icon_text, "video" if icon_text == "videocam" else icon_text or "unknown")
 
                 full_url = href if href.startswith("http") else BASE_URL + href
 
@@ -166,7 +170,7 @@ def scrape_creatives(url, max_scroll=50):
                     "advertiser_id": advertiser_id,
                     "advertiser_name": advertiser_name,
                     "url": full_url,
-                    "format": format_icon or "unknown",
+                    "format": format_type,
                     "verified": is_verified,
                 })
             except Exception:
