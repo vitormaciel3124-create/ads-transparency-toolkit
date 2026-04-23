@@ -1,5 +1,12 @@
 downloads/
-chrome-extension/native-host.log
+reports/
+legacy/
 node_modules/
+__pycache__/
 .next/
 .env
+.DS_Store
+*.mp4
+*.webm
+*.m4a
+*.log
