@@ -6,6 +6,8 @@ __pycache__/
 .next/
 .env
 .DS_Store
+client_secret.json
+.youtube_token.json
 *.mp4
 *.webm
 *.m4a

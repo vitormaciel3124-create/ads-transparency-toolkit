@@ -14,8 +14,10 @@ with their Ads Transparency URLs.
 import argparse
 import json
 import os
+import re
 import sys
 import time
+from datetime import datetime, timedelta
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOADS_DIR = os.path.join(os.path.dirname(SCRIPTS_DIR), "downloads")
@@ -23,6 +25,32 @@ DOWNLOADS_DIR = os.path.join(os.path.dirname(SCRIPTS_DIR), "downloads")
 # Import from sibling module
 sys.path.insert(0, SCRIPTS_DIR)
 from download import extract_from_ads_transparency, download_video
+
+
+def resolve_output_dir(report, output_dir_override=None):
+    """Build output dir as downloads/YYYY-MM-DD_REGION from report metadata."""
+    if output_dir_override:
+        return output_dir_override
+
+    params = report.get("analysis", {}).get("search_params", {})
+    region = params.get("region", "XX").upper()
+    date_preset = params.get("date", "Yesterday")
+    generated_at = report.get("generated_at", "")
+
+    try:
+        report_date = datetime.fromisoformat(generated_at).date()
+    except Exception:
+        report_date = datetime.now().date()
+
+    date_map = {
+        "Yesterday": report_date - timedelta(days=1),
+        "Last 7 days": report_date - timedelta(days=7),
+        "Last 30 days": report_date - timedelta(days=30),
+    }
+    target_date = date_map.get(date_preset, report_date)
+    folder_name = f"{target_date.isoformat()}_{region}"
+
+    return os.path.join(DOWNLOADS_DIR, folder_name)
 
 
 def load_report(path):
@@ -69,7 +97,7 @@ Exemplos:
     parser.add_argument("--select", help="Índices dos criativos para baixar (ex: 1,2,3 ou 1-5)")
     parser.add_argument("--top", type=int, help="Baixar os N primeiros criativos")
     parser.add_argument("--all", action="store_true", dest="select_all", help="Baixar todos os criativos")
-    parser.add_argument("--output-dir", default=DOWNLOADS_DIR, help=f"Pasta de destino (default: downloads/)")
+    parser.add_argument("--output-dir", default=None, help="Pasta de destino (default: downloads/YYYY-MM-DD_REGION/)")
 
     args = parser.parse_args()
 
@@ -91,10 +119,29 @@ Exemplos:
         print("  Nenhum criativo selecionado.")
         sys.exit(1)
 
-    print(f"\n  Batch Download — {len(selected)} criativo(s) selecionado(s)")
-    print(f"  Destino: {args.output_dir}\n")
+    output_dir = resolve_output_dir(report, args.output_dir)
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    print(f"\n  Batch Download — {len(selected)} criativo(s) selecionado(s)")
+    print(f"  Destino: {output_dir}\n")
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Save original URLs before downloading
+    urls_path = os.path.join(output_dir, "urls.csv")
+    with open(urls_path, "w", encoding="utf-8") as f:
+        f.write("index,creative_id,advertiser_id,advertiser_name,format,verified,ads_transparency_url\n")
+        for i, c in enumerate(selected, 1):
+            row = [
+                str(i),
+                c.get("creative_id", ""),
+                c.get("advertiser_id", ""),
+                f'"{c.get("advertiser_name", "")}"',
+                c.get("format", ""),
+                str(c.get("verified", False)),
+                c.get("url", ""),
+            ]
+            f.write(",".join(row) + "\n")
+    print(f"  URLs originais salvas em: {urls_path}\n")
 
     success = 0
     failed = 0
@@ -121,7 +168,7 @@ Exemplos:
                 continue
 
             for v in videos:
-                result = download_video(v, args.output_dir)
+                result = download_video(v, output_dir)
                 if result:
                     success += 1
                 else:
@@ -137,7 +184,7 @@ Exemplos:
     print(f"  {'=' * 50}")
     print(f"  Concluído em {elapsed:.0f}s")
     print(f"  Sucesso: {success}  |  Falha: {failed}")
-    print(f"  Arquivos em: {args.output_dir}")
+    print(f"  Arquivos em: {output_dir}")
     print(f"  {'=' * 50}\n")
 
 

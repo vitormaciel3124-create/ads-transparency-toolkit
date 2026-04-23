@@ -9,6 +9,7 @@ Um toolkit CLI que permite:
 1. **Analisar** todos os anúncios de um domínio no Ads Transparency Center
 2. **Selecionar** quais criativos de vídeo baixar
 3. **Baixar** os vídeos em lote como MP4
+4. **Fazer upload** dos vídeos baixados para o YouTube via API
 
 ## Fluxo de trabalho padrão
 
@@ -71,14 +72,87 @@ Para um criativo individual, use:
 python3 scripts/download.py "URL_DO_CRIATIVO"
 ```
 
+### Passo 4: Upload para o YouTube
+
+Use `scripts/upload.py` para enviar os vídeos baixados ao YouTube:
+
+```bash
+# Upload de todos os vídeos da pasta downloads/
+python3 scripts/upload.py
+
+# Upload de arquivos específicos
+python3 scripts/upload.py downloads/video1.mp4 downloads/video2.mp4
+
+# Upload como público
+python3 scripts/upload.py --privacy public
+
+# Upload como Shorts
+python3 scripts/upload.py --shorts
+
+# Dry run (listar sem enviar)
+python3 scripts/upload.py --dry-run
+```
+
+Requer `client_secret.json` na raiz do projeto (credencial OAuth 2.0 do Google Cloud Console).
+Na primeira execução, abrirá o navegador para autorização.
+
+## Organização dos downloads
+
+Os vídeos são salvos em subpastas de `downloads/` no formato `YYYY-MM-DD_REGION`:
+
+```
+downloads/
+├── 2026-04-22_US/     → Anúncios de 22/04/2026 nos EUA
+│   ├── video1.mp4
+│   └── video2.mp4
+├── 2026-04-22_BR/     → Anúncios de 22/04/2026 no Brasil
+│   └── video3.mp4
+└── 2026-04-23_GB/     → Anúncios de 23/04/2026 no Reino Unido
+    └── video4.mp4
+```
+
+O `batch_download.py` cria automaticamente a pasta correta com base nos parâmetros
+do relatório (região e data). O `upload.py` lê a pasta para extrair `ad_date` e `region`
+e registra tudo em `reports/uploads.json`.
+
+## Formato do uploads.json
+
+```json
+{
+  "uploads": [
+    {
+      "uploaded_at": "2026-04-23T18:04:30",
+      "file": "video.mp4",
+      "folder": "2026-04-22_US",
+      "title": "Titulo do Video",
+      "privacy": "unlisted",
+      "ad_date": "2026-04-22",
+      "region": "US",
+      "success": true,
+      "video_id": "abc123",
+      "url": "https://youtu.be/abc123"
+    }
+  ],
+  "stats": {"total_uploaded": 10, "total_failed": 2},
+  "last_updated": "2026-04-23T18:05:00"
+}
+```
+
+Este JSON é a base de dados que outros agentes podem consultar para testar/validar criativos.
+
 ## Estrutura dos arquivos
 
 ```
 scripts/analyze.py         → Scraping + análise (gera JSON em reports/)
 scripts/download.py        → Download individual (Playwright + yt-dlp)
 scripts/batch_download.py  → Download em lote (usa report JSON)
+scripts/upload.py          → Upload de vídeos para o YouTube (API v3)
 reports/                   → Relatórios JSON (gitignored)
-downloads/                 → Vídeos MP4 baixados (gitignored)
+reports/uploads.json       → Log de todos os uploads feitos ao YouTube
+downloads/                 → Vídeos MP4 organizados por data/região
+downloads/YYYY-MM-DD_XX/   → Subpasta por data do anúncio e código do país
+client_secret.json         → Credencial OAuth (gitignored)
+.youtube_token.json        → Token de sessão YouTube (gitignored)
 ```
 
 ## Formato do relatório JSON
@@ -127,6 +201,7 @@ O Ads Transparency Center embute vídeos do YouTube via iframes. O fluxo de down
 - yt-dlp (brew install yt-dlp)
 - ffmpeg (brew install ffmpeg) — para conversão automática de codec
 - Google Chrome logado (necessário para cookies do yt-dlp)
+- google-api-python-client, google-auth, google-auth-oauthlib (para upload YouTube)
 
 ## Restrições importantes
 
