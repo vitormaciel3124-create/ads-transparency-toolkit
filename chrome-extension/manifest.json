@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Ads Transparency Downloader",
+  "version": "1.0.0",
+  "description": "Download videos from Google Ads Transparency Center with one click",
+  "permissions": [
+    "nativeMessaging",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://adstransparency.google.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://adstransparency.google.com/*"],
+      "js": ["content.js"],
+      "css": ["style.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}
