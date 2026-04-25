@@ -20,7 +20,9 @@ import time
 from datetime import datetime, timedelta
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
-DOWNLOADS_DIR = os.path.join(os.path.dirname(SCRIPTS_DIR), "downloads")
+ROOT_DIR = os.path.dirname(SCRIPTS_DIR)
+DOWNLOADS_DIR = os.path.join(ROOT_DIR, "downloads")
+CSV_DIR = os.path.join(ROOT_DIR, "csv")
 
 # Import from sibling module
 sys.path.insert(0, SCRIPTS_DIR)
@@ -98,6 +100,7 @@ Exemplos:
     parser.add_argument("--top", type=int, help="Baixar os N primeiros criativos")
     parser.add_argument("--all", action="store_true", dest="select_all", help="Baixar todos os criativos")
     parser.add_argument("--output-dir", default=None, help="Pasta de destino (default: downloads/YYYY-MM-DD_REGION/)")
+    parser.add_argument("--csv-only", action="store_true", help="Apenas gerar CSV com URLs (sem download)")
 
     args = parser.parse_args()
 
@@ -121,31 +124,20 @@ Exemplos:
 
     output_dir = resolve_output_dir(report, args.output_dir)
 
-    print(f"\n  Batch Download — {len(selected)} criativo(s) selecionado(s)")
+    mode = "CSV only" if args.csv_only else "Download"
+    print(f"\n  Batch {mode} — {len(selected)} criativo(s) selecionado(s)")
     print(f"  Destino: {output_dir}\n")
 
     os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(CSV_DIR, exist_ok=True)
 
-    # Save original URLs before downloading
-    urls_path = os.path.join(output_dir, "urls.csv")
-    with open(urls_path, "w", encoding="utf-8") as f:
-        f.write("index,creative_id,advertiser_id,advertiser_name,format,verified,ads_transparency_url\n")
-        for i, c in enumerate(selected, 1):
-            row = [
-                str(i),
-                c.get("creative_id", ""),
-                c.get("advertiser_id", ""),
-                f'"{c.get("advertiser_name", "")}"',
-                c.get("format", ""),
-                str(c.get("verified", False)),
-                c.get("url", ""),
-            ]
-            f.write(",".join(row) + "\n")
-    print(f"  URLs originais salvas em: {urls_path}\n")
+    params = report.get("analysis", {}).get("search_params", {})
+    region = params.get("region", "")
+    date_filter = params.get("date", "")
 
-    success = 0
-    failed = 0
-    start_time = time.time()
+    # --- Phase 1: extract YouTube video info from each creative ---
+    print("  Fase 1/2 — Extraindo URLs de vídeo...\n")
+    enriched = []
 
     for i, creative in enumerate(selected, 1):
         url = creative.get("url", "")
@@ -156,28 +148,90 @@ Exemplos:
 
         if not url or "adstransparency.google.com" not in url:
             print(f"    SKIP: URL inválida")
-            failed += 1
+            enriched.append({**creative, "_videos": []})
             continue
 
         try:
             videos = extract_from_ads_transparency(url)
-
+            enriched.append({**creative, "_videos": videos or []})
             if not videos:
-                print(f"    SKIP: Nenhum vídeo YouTube encontrado")
-                failed += 1
-                continue
+                print(f"    Nenhum vídeo YouTube encontrado")
+            else:
+                for v in videos:
+                    yt_url = f"https://www.youtube.com/shorts/{v['id']}" if v.get("is_short") else f"https://www.youtube.com/watch?v={v['id']}"
+                    print(f"    -> {yt_url}")
+        except Exception as e:
+            print(f"    ERRO: {e}")
+            enriched.append({**creative, "_videos": []})
 
-            for v in videos:
+        print()
+
+    # --- Save CSV with all enriched data ---
+    csv_name = os.path.basename(output_dir) + ".csv"
+    urls_path = os.path.join(CSV_DIR, csv_name)
+    csv_row_idx = 0
+    with open(urls_path, "w", encoding="utf-8") as f:
+        f.write("index,advertiser_name,ads_transparency_url,video_url,youtube_channel,region,date_filter\n")
+        for c in enriched:
+            videos = c.get("_videos", [])
+            if not videos:
+                csv_row_idx += 1
+                row = [
+                    str(csv_row_idx),
+                    _csv_escape(c.get("advertiser_name", "")),
+                    c.get("url", ""),
+                    "",
+                    "",
+                    region,
+                    date_filter,
+                ]
+                f.write(",".join(row) + "\n")
+            else:
+                for v in videos:
+                    csv_row_idx += 1
+                    yt_url = f"https://www.youtube.com/shorts/{v['id']}" if v.get("is_short") else f"https://www.youtube.com/watch?v={v['id']}"
+                    row = [
+                        str(csv_row_idx),
+                        _csv_escape(c.get("advertiser_name", "")),
+                        c.get("url", ""),
+                        yt_url,
+                        _csv_escape(v.get("channel", "") or ""),
+                        region,
+                        date_filter,
+                    ]
+                    f.write(",".join(row) + "\n")
+    print(f"  CSV salvo em: {urls_path}  ({csv_row_idx} linhas)\n")
+
+    if args.csv_only:
+        print(f"  {'=' * 50}")
+        print(f"  Modo --csv-only: download pulado")
+        print(f"  CSV em: {urls_path}")
+        print(f"  {'=' * 50}\n")
+        return
+
+    # --- Phase 2: download videos ---
+    print("  Fase 2/2 — Baixando vídeos...\n")
+    success = 0
+    failed = 0
+    start_time = time.time()
+
+    for i, creative in enumerate(enriched, 1):
+        videos = creative.get("_videos", [])
+
+        if not videos:
+            failed += 1
+            continue
+
+        for v in videos:
+            try:
                 result = download_video(v, output_dir)
                 if result:
                     success += 1
                 else:
                     failed += 1
-        except Exception as e:
-            print(f"    ERRO: {e}")
-            failed += 1
-
-        print()
+            except Exception as e:
+                print(f"    ERRO download: {e}")
+                failed += 1
 
     elapsed = time.time() - start_time
 
@@ -185,7 +239,16 @@ Exemplos:
     print(f"  Concluído em {elapsed:.0f}s")
     print(f"  Sucesso: {success}  |  Falha: {failed}")
     print(f"  Arquivos em: {output_dir}")
+    print(f"  CSV em:      {urls_path}")
     print(f"  {'=' * 50}\n")
+
+
+def _csv_escape(value):
+    """Wrap value in quotes if it contains commas or quotes."""
+    s = str(value)
+    if "," in s or '"' in s or "\n" in s:
+        return '"' + s.replace('"', '""') + '"'
+    return s
 
 
 if __name__ == "__main__":

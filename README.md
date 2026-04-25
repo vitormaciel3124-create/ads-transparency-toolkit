@@ -1,18 +1,19 @@
 # Ads Transparency Toolkit
 
-Ferramenta CLI para analisar e baixar vídeos de anúncios do [Google Ads Transparency Center](https://adstransparency.google.com/).
+Ferramenta CLI para analisar e baixar vídeos de anúncios do [Google Ads Transparency Center](https://adstransparency.google.com/) e da [Meta Ads Library](https://www.facebook.com/ads/library/) (Facebook/Instagram).
 
-Permite investigar quais anúncios um domínio está veiculando, identificar padrões de repetição, e baixar os criativos de vídeo em lote.
+Permite investigar quais anúncios um domínio ou tema está veiculando, identificar padrões de repetição, e baixar os criativos de vídeo em lote.
 
 ## Pré-requisitos
 
-| Ferramenta | Instalação |
-|------------|-----------|
-| **Python 3.10+** | [python.org](https://www.python.org/) |
-| **Playwright** | `pip install playwright && playwright install chromium` |
-| **yt-dlp** | `brew install yt-dlp` ou [github.com/yt-dlp/yt-dlp](https://github.com/yt-dlp/yt-dlp) |
-| **ffmpeg** | `brew install ffmpeg` (opcional, para conversão de codec) |
-| **Google Chrome** | Necessário para cookies de autenticação do YouTube |
+| Ferramenta | Instalação | Usado por |
+|------------|-----------|-----------|
+| **Python 3.10+** | [python.org](https://www.python.org/) | Todos os scripts |
+| **Playwright** | `pip install playwright && playwright install chromium` | Google Ads (analyze/download) |
+| **yt-dlp** | `brew install yt-dlp` | Google Ads download, Meta fallback |
+| **ffmpeg** | `brew install ffmpeg` | Conversão de codec (opcional) |
+| **Google Chrome** | Logado — necessário para cookies do yt-dlp | Ambas plataformas |
+| **Chrome DevTools MCP** | Configurado no Cursor | Meta Ads (via agente) |
 
 ## Instalação rápida
 
@@ -23,7 +24,19 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-## Como usar
+## Plataformas suportadas
+
+### Google Ads Transparency Center
+
+Scraping via Playwright headless — analisa anúncios por domínio, baixa vídeos do YouTube embedado.
+
+### Meta Ads Library (Facebook/Instagram)
+
+Arquitetura **sem Playwright** — o agente AI (Cursor) controla o Chrome real via MCP DevTools, e o Python só salva relatórios e baixa URLs da CDN.
+
+---
+
+## Google Ads — Como usar
 
 ### 1. Analisar anúncios de um domínio
 
@@ -60,68 +73,137 @@ Após rodar o `analyze.py`, use o relatório JSON para baixar em lote:
 
 ```bash
 # Baixar criativos específicos por índice
-python3 scripts/batch_download.py --report reports/robloxos_com_US_20260423_170000.json --select 1,2,3
+python3 scripts/batch_download.py --report reports/robloxos_com_US_20260423.json --select 1,2,3
 
 # Baixar um range
-python3 scripts/batch_download.py --report reports/robloxos_com_US_20260423_170000.json --select 1-5
+python3 scripts/batch_download.py --report reports/robloxos_com_US_20260423.json --select 1-5
 
 # Baixar os 10 primeiros
-python3 scripts/batch_download.py --report reports/robloxos_com_US_20260423_170000.json --top 10
+python3 scripts/batch_download.py --report reports/robloxos_com_US_20260423.json --top 10
 
 # Baixar todos
-python3 scripts/batch_download.py --report reports/robloxos_com_US_20260423_170000.json --all
-```
+python3 scripts/batch_download.py --report reports/robloxos_com_US_20260423.json --all
 
-Os vídeos são salvos em `downloads/` no formato MP4 (H.264), compatível com QuickTime.
+# Apenas gerar CSV com URLs (sem download)
+python3 scripts/batch_download.py --report reports/robloxos_com_US_20260423.json --all --csv-only
+```
 
 ### 3. Baixar um vídeo individual
 
-Se você já tem a URL de um criativo específico ou video ID do YouTube:
-
 ```bash
-# URL do Ads Transparency
-python3 scripts/download.py "https://adstransparency.google.com/advertiser/AR.../creative/CR...?region=US&format=VIDEO"
-
-# URL do YouTube
+python3 scripts/download.py "https://adstransparency.google.com/advertiser/AR.../creative/CR..."
 python3 scripts/download.py "https://www.youtube.com/watch?v=VIDEO_ID"
-
-# Video ID direto
 python3 scripts/download.py VIDEO_ID
 ```
+
+---
+
+## Meta Ads Library — Como usar
+
+A Meta Ads Library usa uma arquitetura diferente: o **agente AI** (Cursor com MCP) controla o Chrome para navegar e extrair dados, e scripts Python leves cuidam do resto.
+
+### 1. Analisar anúncios (via agente AI)
+
+O fluxo é feito pelo agente no Cursor. Basta pedir:
+> "Analisa os anúncios de vídeo de reelshort.com na Meta Ads Library"
+
+O agente vai:
+1. Navegar na Meta Ads Library via MCP DevTools
+2. Fazer scroll para carregar anúncios de vídeo
+3. Extrair todos os criativos (Library ID, anunciante, URLs, datas)
+4. Salvar relatório JSON em `reports/`
+5. Apresentar o resumo
+
+### 2. Baixar criativos
+
+Após a análise, o download pode ser feito via CLI:
+
+```bash
+# Todos os criativos
+python3 scripts/meta_download.py --report reports/meta_reelshort_US_20260425.json --all
+
+# Top 5
+python3 scripts/meta_download.py --report reports/meta_reelshort_US_20260425.json --top 5
+
+# Seleção por índice
+python3 scripts/meta_download.py --report reports/meta_reelshort_US_20260425.json --select 1-10
+
+# URLs CDN diretas
+python3 scripts/meta_download.py --urls "https://video.xx.fbcdn.net/..." "https://..."
+
+# Por Library ID (sem relatório)
+python3 scripts/meta_download.py --library-id 1234567890
+```
+
+### 3. Uso manual (sem agente)
+
+Também é possível gerar a URL e processar dados manualmente:
+
+```bash
+# Gerar URL para abrir no browser
+python3 scripts/meta_analyze.py --build-url --query "nike" --country US
+
+# Salvar relatório a partir de JSON extraído
+echo '{"ads": [...]}' | python3 scripts/meta_analyze.py --from-stdin -q "nike" -c US
+```
+
+---
+
+## Upload para o YouTube
+
+```bash
+python3 scripts/upload.py                          # Todos da pasta downloads/
+python3 scripts/upload.py downloads/video1.mp4     # Arquivos específicos
+python3 scripts/upload.py --privacy public         # Como público
+python3 scripts/upload.py --shorts                 # Como Shorts
+python3 scripts/upload.py --dry-run                # Listar sem enviar
+```
+
+Requer `client_secret.json` (credencial OAuth do Google Cloud Console).
+
+---
 
 ## Estrutura do projeto
 
 ```
 ads-transparency-toolkit/
-├── README.md              ← Este arquivo
-├── AGENTS.md              ← Contexto para agentes AI (Cursor, Copilot)
-├── requirements.txt       ← Dependências Python
+├── README.md                       ← Este arquivo
+├── AGENTS.md                       ← Contexto para agentes AI (Cursor, Copilot)
+├── requirements.txt                ← Dependências Python
 ├── scripts/
-│   ├── analyze.py         ← Scraping + análise de anúncios
-│   ├── download.py        ← Download individual de vídeos
-│   └── batch_download.py  ← Download em lote via relatório
-├── reports/               ← Relatórios JSON gerados (gitignored)
-└── downloads/             ← Vídeos baixados (gitignored)
+│   ├── analyze.py                  ← Google: scraping + análise
+│   ├── analyze_mcp.py              ← Google: análise via Chrome MCP (CDP)
+│   ├── download.py                 ← Google: download individual
+│   ├── batch_download.py           ← Google: download em lote
+│   ├── mcp_snippets.js             ← Google: JS snippets para MCP
+│   ├── meta_analyze.py             ← Meta: salva relatório (recebe dados do MCP)
+│   ├── meta_download.py            ← Meta: download de URLs CDN
+│   ├── meta_mcp_snippets.js        ← Meta: JS snippets para MCP
+│   └── upload.py                   ← Upload para YouTube (API v3)
+├── csv/                            ← CSVs com URLs extraídas
+├── reports/                        ← Relatórios JSON (gitignored)
+└── downloads/                      ← Vídeos MP4 (gitignored)
 ```
 
 ## Como funciona
 
-1. **analyze.py** usa Playwright (Chromium headless) para abrir a página de listagem do Ads Transparency, fazer scroll para carregar todos os cards, e extrair URLs + metadados de cada criativo.
+### Google Ads Transparency
+1. **analyze.py** usa Playwright (Chromium headless) para scraping da página de listagem, scroll progressivo, e extração de URLs + metadados.
+2. **download.py** abre o criativo, encontra o iframe YouTube embedado, extrai Video ID via `ytmVideoInfoVideoTitle`, e baixa com `yt-dlp` + cookies do Chrome.
+3. **batch_download.py** orquestra o download em lote a partir do relatório JSON, gera CSV com todas as URLs.
 
-2. **download.py** abre a página de um criativo individual, encontra o iframe do YouTube embedado, extrai o Video ID e metadados (título, canal, se é Short) via o elemento `ytmVideoInfoVideoTitle` dentro do iframe, e usa `yt-dlp` para baixar o vídeo com cookies do Chrome.
-
-3. **batch_download.py** lê o relatório JSON e chama `download.py` para cada criativo selecionado.
-
-Os vídeos são baixados preferencialmente em H.264 (compatível com QuickTime/macOS). Se o YouTube servir em AV1/VP9, o script converte automaticamente com ffmpeg.
+### Meta Ads Library
+1. O agente usa **MCP DevTools** para controlar o Chrome real do usuário (já logado no Facebook).
+2. **meta_mcp_snippets.js** contém os scripts JS que o agente executa via `evaluate_script` (scroll, extração de vídeos, tentativa de HD).
+3. **meta_analyze.py** recebe os dados extraídos e salva o relatório JSON.
+4. **meta_download.py** baixa os MP4 diretamente da CDN do Facebook (`*.fbcdn.net`) com `urllib` — sem browser.
 
 ## Regiões disponíveis
 
 Alguns códigos comuns: `US`, `BR`, `GB`, `DE`, `FR`, `ES`, `IT`, `JP`, `AU`, `CA`, `MX`, `AR`, `CL`, `CO`, `PT`, `IN`.
 
-Lista completa: use o seletor de país no [Ads Transparency Center](https://adstransparency.google.com/).
-
 ## Notas
 
-- O yt-dlp usa cookies do Chrome para autenticação no YouTube. Mantenha o Chrome logado na sua conta Google.
-- O Playwright precisa do Chromium instalado via `playwright install chromium`.
-- Os relatórios e downloads são gitignored para não poluir o repositório.
+- O yt-dlp usa cookies do Chrome para autenticação no YouTube. Mantenha o Chrome logado.
+- URLs CDN da Meta expiram em horas — baixe logo após a extração.
+- Os relatórios, downloads e CSVs de dados são gitignored para não poluir o repositório.
